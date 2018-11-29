@@ -1,0 +1,317 @@
+#!/bin/sh
+#
+# Usage: 	mexext
+#
+# Description:	This Bourne shell script returns the mex extension
+#		for the current machine.
+#
+# Example:      The following is a fragment of a GNU makefile that uses the
+#               mexext script to obtain the MEX-file extension: 
+#
+#            	ext = $(shell mexext)
+#
+#            	yprime.$(ext) : yprime.c 
+#               	mex yprime.c
+#
+#----------------------------------------------------------------------------
+#
+    trap "exit" 0 1 2 3 15
+#
+    mexlist='mexsol mexs64 mexglx mexa64 mexmac mexmaci mexmaci64'
+    ARCH="" 
+#
+#========================= archlist.sh (start) ============================
+#
+# usage:        archlist.sh
+#
+# abstract:     This Bourne Shell script creates the variable ARCH_LIST.
+#
+# note(s):      1. This file is always imbedded in another script
+#
+# Copyright 1997-2013 The MathWorks, Inc.
+#----------------------------------------------------------------------------
+#
+    ARCH_LIST='glnxa64 maci64'
+#=======================================================================
+# Functions:
+#   check_archlist ()
+#=======================================================================
+    check_archlist () { # Sets ARCH. If first argument contains a valid
+			# arch then ARCH is set to that value else
+		        # an empty string. If there is a second argument
+			# do not output any warning message. The most
+			# common forms of the first argument are:
+			#
+			#     ARCH=arch
+			#     MATLAB_ARCH=arch
+			#     argument=-arch
+			#
+                        # Always returns a 0 status.
+                        #
+                        # usage: check_archlist arch=[-]value [noprint]
+                        #
+	if [ $# -gt 0 ]; then
+	    arch_in=`expr "$1" : '.*=\(.*\)'`
+	    if [ "$arch_in" != "" ]; then
+	        ARCH=`echo "$ARCH_LIST EOF $arch_in" | awk '
+#-----------------------------------------------------------------------
+	{ for (i = 1; i <= NF; i = i + 1)
+	      if ($i == "EOF")
+		  narch = i - 1
+	  for (i = 1; i <= narch; i = i + 1)
+		if ($i == $NF || "-" $i == $NF) {
+		    print $i
+		    exit
+		}
+	}'`
+#-----------------------------------------------------------------------
+	       if [ "$ARCH" = "" -a $# -eq 1 ]; then
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+echo ' '
+echo "    Warning: $1 does not specify a valid architecture - ignored . . ."
+echo ' '
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	       fi
+	    else
+		ARCH=""
+	    fi
+	else
+	    ARCH=""
+	fi
+#
+	return 0
+    }
+#=======================================================================
+#========================= archlist.sh (end) ==============================
+#
+#========================= arch.sh (start) ============================
+#!/bin/sh
+#
+# usage:        arch.sh
+#
+# abstract:     This Bourne Shell script determines the architecture
+#               of the the current machine.
+#
+#               ARCH      - Machine architecture
+#
+#               IMPORTANT: The shell function 'check_archlist' is used
+#                          by this routine and MUST be loaded first.
+#                          This can be done by sourcing the file,
+#
+#                              archlist.sh
+#
+#                          before using this routine.
+#
+# note(s):      1. This routine must be called using a . (period)
+#
+#               2. Also returns ARCH_MSG which may contain additional
+#                  information when ARCH returns 'unknown'.
+#
+# Copyright 1986-2016 The MathWorks, Inc.
+#----------------------------------------------------------------------------
+#
+#=======================================================================
+# Functions:
+#   realfilepath ()
+#   matlab_arch ()
+#=======================================================================
+    realfilepath () { # Returns the actual path in the file system
+                      # of a file. It follows links. It returns an
+                      # empty path if an error occurs.
+                      #
+                      # Returns a 1 status if the file does not exist
+                      # or appears to be a circular link. Otherwise,
+                      # a 0 status is returned.
+                      #
+                      # usage: realfilepath filepath
+                      #
+    filename=$1
+#
+# Now it is either a file or a link to a file.
+#
+    cpath=`pwd`
+
+#
+# Follow up to 8 links before giving up. Same as BSD 4.3
+#
+      n=1
+      maxlinks=8
+      while [ $n -le $maxlinks ]
+      do
+#
+# Get directory correctly!
+#
+	newdir=`echo "$filename" | awk '
+                        { tail = $0
+                          np = index (tail, "/")
+                          while ( np != 0 ) {
+                             tail = substr (tail, np + 1, length (tail) - np)
+                             if (tail == "" ) break
+                             np = index (tail, "/")
+                          }
+                          head = substr ($0, 1, length ($0) - length (tail))
+                          if ( tail == "." || tail == "..")
+                             print $0
+                          else
+                             print head
+                        }'`
+	if [ ! "$newdir" ]; then
+	    newdir="."
+	fi
+	(cd "$newdir") > /dev/null 2>&1
+	if [ $? -ne 0 ]; then
+	    return 1
+	fi
+	cd "$newdir"
+#
+# Need the function pwd - not the built in one
+#
+	newdir=`/bin/pwd`
+#
+	newbase=`expr //"$filename" : '.*/\(.*\)' \| "$filename"`
+        lscmd=`ls -ld "$newbase" 2>/dev/null`
+	if [ ! "$lscmd" ]; then
+	    return 1
+	fi
+#
+# Check for link portably
+#
+	if [ `expr "$lscmd" : '.*->.*'` -ne 0 ]; then
+	    filename=`echo "$lscmd" | awk '{ print $NF }'`
+	else
+#
+# It's a file
+#
+	    dir="$newdir"
+	    command="$newbase"
+#
+	    cd "$dir"
+#
+# On Mac OS X, the -P option to pwd causes it to return a resolved path, but
+# on 10.5 and later, -P is no longer the default, so we are now passing -P explicitly.
+#
+            if [ "$ARCH" = 'maci64' ]; then
+                echo `/bin/pwd -P`/$command
+#
+# The Linux version of pwd returns a resolved path by default, and there is
+# no -P option
+#
+            else
+                echo `/bin/pwd`/$command
+            fi
+	    break
+	fi
+	n=`expr $n + 1`
+      done
+      if [ $n -gt $maxlinks ]; then
+	return 1
+      fi
+
+    cd "$cpath"
+    }
+#
+#
+#=======================================================================
+    matlab_arch () {  # Determine the architecture for MATLAB
+                      # It returns the value in the ARCH variable.
+                      # If 'unknown' is returned then sometimes a
+                      # diagnostic message is returned in ARCH_MSG.
+                      #
+                      # Always returns a 0 status.
+                      #
+                      # usage: matlab_arch
+                      #
+        ARCH="unknown"
+#
+        if [ -f /bin/uname ]; then
+            case "`/bin/uname`" in
+                Linux)
+                    case "`/bin/uname -m`" in
+                        x86_64)
+                            ARCH="glnxa64"
+                            ;;
+                    esac
+                    ;;
+            esac
+        elif [ -f /usr/bin/uname ]; then
+            case "`/usr/bin/uname`" in
+                Darwin)                                 # Mac OS X
+                    case "`/usr/bin/uname -p`" in
+                        i386)
+                            ARCH="maci64"
+                            ;;
+                        esac
+                    ;;
+            esac
+        fi
+        return 0
+    }
+#=======================================================================
+#
+# The local shell function check_archlist is assumed to be loaded before this
+# function is sourced.
+#
+    ARCH_MSG=''
+    check_archlist ARCH=$ARCH
+    if [ "$ARCH" = "" ]; then
+        if [ "$MATLAB_ARCH" != "" ]; then
+            check_archlist MATLAB_ARCH=$MATLAB_ARCH
+        fi
+        if [ "$ARCH" = "" ]; then
+            matlab_arch
+        fi
+    fi
+    Arch=$ARCH
+#========================= arch.sh (end) ==============================
+#
+#=======================================================================
+# Function:
+#   print_ext ()
+#=======================================================================
+    print_ext () { # Prints to standard out the MEX extension for a given
+		   # platform.
+
+    case $ARCH in
+        glnx86)
+            ext="mexglx"
+            ;;
+        glnxa64)
+            ext="mexa64"
+            ;;
+        mac)
+            ext="mexmac"
+            ;;
+        maci)
+            ext="mexmaci"
+            ;;
+        maci64)
+            ext="mexmaci64"
+            ;;
+        sol2)
+            ext="mexsol"
+            ;;
+        sol64)
+            ext="mexs64"
+            ;;
+        win64)
+            ext="mexw64"
+            ;;
+        win32)
+            ext="mexw32"
+            ;;
+	*)
+	    echo "Error: MEXEXT: Unsupported platform." 1>&2
+            exit 1
+	    ;;
+    esac
+    echo $ext
+    return 0
+}
+#------------------------------------------------------------------------------
+#
+    if [ $# -ne 0 ]; then
+	echo "Error: MEXEXT: No arguments are allowed." 1>&2
+        exit 1
+    fi
+    print_ext
+    exit 0
